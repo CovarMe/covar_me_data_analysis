@@ -4,7 +4,17 @@ import sys, getopt, csv, requests, json, time, datetime
 
 def main(argv):
     try:
-        opts, args = getopt.getopt(argv,"hH:p:i:s:m:c:t:n:",["host=","port=","interval=","stocks=","metrics=","cols=","timestamp-col==","name-col"])
+        opts, args = getopt.getopt(argv,"hH:p:i:s:m:c:t:n:o:",[
+            "host=",
+            "port=",
+            "interval=",
+            "stocks=",
+            "metrics=",
+            "cols=",
+            "timestamp-col=",
+            "name-col="
+            "offset="
+        ])
 
     except getopt.GetoptError:
         print 'Wrong options supplied, try with -h'
@@ -21,6 +31,7 @@ def main(argv):
             print '    -c <corresponding columns (in same order)>'
             print '    -t <label of the timestamp column in data>'
             print '    -n <label of the company name column in data (e.g. ticker)>'
+            print '    -o <number of offset rows to start importing from>' 
             sys.exit()
         elif opt in ("-H", "--host"):
             host = arg
@@ -38,6 +49,8 @@ def main(argv):
             time_col = arg
         elif opt in ("-n", "--name-col"):
             name_col = arg
+        elif opt in ("-o", "--offset"):
+            n_offset = int(arg)
 
     mapping = zip(metrics.split(","),cols.split(","))
     print 'Uploading Data for ' + metrics + ' on OpenTSDB from csv columns ' + cols
@@ -51,7 +64,11 @@ def main(argv):
     with open(source) as s:
         request_data = []
         inserted = 0
-        for i, row in enumerate(csv.DictReader(s)):
+        csvr = csv.DictReader(s)
+        for i in range(0, n_offset):
+            next(csvr)
+            
+        for i, row in enumerate(csvr):
             row_query_template = query_template.copy()
             date = datetime.datetime.strptime(row[time_col], "%d/%m/%Y")
             row_query_template['timestamp'] = date.strftime('%s')
