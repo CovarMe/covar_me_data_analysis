@@ -50,6 +50,7 @@ def main(argv):
     request_url = host + ":" + str(port) + "/api/put?summary=true&sync=true&details=true"
     with open(source) as s:
         request_data = []
+        inserted = 0
         for i, row in enumerate(csv.DictReader(s)):
             row_query_template = query_template.copy()
             date = datetime.datetime.strptime(row[time_col], "%d/%m/%Y")
@@ -62,11 +63,12 @@ def main(argv):
             
             if i % interval == 0 and i != 0:
                 response = requests.post(request_url, data = json.dumps(request_data))
-                print(response.content)
                 try:
                     response_dict = response.json()
                     if response_dict['failed'] > 1:
-                        sys.exit('Request failed')
+                        sys.exit(response.content)
+                    inserted += response_dict['success']
+                    print 'Inserted: ' + str(inserted)
                     request_data = []
                 except ValueError:
                     sys.exit(response.reason)
