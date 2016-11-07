@@ -60,10 +60,16 @@ def main(argv):
                 q['value'] =  row[c]
                 request_data.append(q)
             
-            if i % interval == 0:
+            if i % interval == 0 and i != 0:
                 response = requests.post(request_url, data = json.dumps(request_data))
-                print response.content
-                request_data = []
+                print(response.content)
+                try:
+                    response_dict = response.json()
+                    if response_dict['failed'] > 1:
+                        sys.exit('Request failed')
+                    request_data = []
+                except ValueError:
+                    sys.exit(response.reason)
 
 
 
