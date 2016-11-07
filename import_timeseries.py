@@ -1,6 +1,7 @@
 #!/usr/bin/python
 
-import sys, getopt, csv, requests, json, time, datetime
+import sys, getopt, csv, requests, json, time, datetime, logging
+logging.basicConfig(filename='import.log',level=logging.DEBUG)
 
 def main(argv):
     # this entire first part is only for reading in the command line arguments 
@@ -89,15 +90,16 @@ def main(argv):
 
             # check if the interval size has been reached and send a request
             if i % interval == 0 and i != 0:
+                print '='
                 response = requests.post(request_url, 
                                          data = json.dumps(request_data))
                 try:
                     response_dict = response.json()
                     if response_dict['failed'] > 1:
-                        print(response.content)
+                        logging.debug(response.content)
 
                     inserted += response_dict['success']
-                    print 'Inserted: ' + str(inserted)
+                    logging.debug('Inserted: ' + str(inserted))
                     request_data = []
                 except ValueError:
                     sys.exit(response.reason)
