@@ -58,13 +58,8 @@ def main(argv):
     print 'Uploading Data for ' + metrics + ' on OpenTSDB from csv columns ' + cols
 
     # define static elements that are the same for ever insert query
-    query_template = {
-        "tags": {
-            "host": 1
-        }
-    }
     # build the URL to send the database request to
-    request_url = host + ":" + str(port) + "/api/put?summary=true&sync=true&details=true"
+    request_url = host + ":" + str(port) + "/api/put?summary=true&details=true"
     with open(source) as s:
         request_data = []
         inserted = 0
@@ -72,20 +67,26 @@ def main(argv):
         # skip the first n lines according to the offset option
         for i in range(0, n_offset):
             next(csvr)
-            
+
         # iterate through the lines of the given csv
         for i, row in enumerate(csvr):
-            row_query_template = query_template.copy()
             # get the correct timestamp from the given date column
             date = datetime.datetime.strptime(row[time_col], "%d/%m/%Y")
-            row_query_template['timestamp'] = date.strftime('%s')
+            # build a query object
+            row_query_template = {
+                "timestamp":date.strftime('%s'), 
+                "tags": {
+                    "company": row[name_col],
+                }
+            }
             for m, c in mapping:
                 # build metrics from the metric, column mappings
                 q = row_query_template.copy()
                 q['metric'] = row[name_col] + '.' + m
                 q['value'] =  row[c]
+                q['tags']['metric'] = m
                 request_data.append(q)
-            
+
             # check if the interval size has been reached and send a request
             if i % interval == 0 and i != 0:
                 response = requests.post(request_url, 
@@ -93,7 +94,8 @@ def main(argv):
                 try:
                     response_dict = response.json()
                     if response_dict['failed'] > 1:
-                        sys.exit(response.content)
+                        print(response.content)
+
                     inserted += response_dict['success']
                     print 'Inserted: ' + str(inserted)
                     request_data = []

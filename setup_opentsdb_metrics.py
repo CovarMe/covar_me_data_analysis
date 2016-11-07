@@ -3,9 +3,9 @@
 import subprocess, sys, getopt, csv
 
 def main(argv):
+    # read command line arguements
     try:
         opts, args = getopt.getopt(argv,"ht:m:",["tickers=","metrics="])
-
     except getopt.GetoptError:
         print 'Wrong options supplied, try with -h'
         sys.exit(2)
@@ -19,19 +19,21 @@ def main(argv):
         elif opt in ("-m", "--metrics"):
             metrics = arg
 
+    # start creating metrics
     print 'Creating Metrics: ' + metrics + " on OpenTSDB"
-
     with open(tickersfile) as f:
-        metrics = metrics.split(",")
         call_args = []
+        # iterate csv file rows
         for row in csv.reader(f):
             ticker = row[0]
-            if len(call_args) > 100 * len(metrics):
-                subprocess.check_call("tsdb mkmetric " + " ".join(call_args), shell = True)
-                call_args = []
-
+            # create a metric in opentsdb for evey given metric for the company
             for metric in metrics.split(","):
                 call_args.append(ticker + "." + metric)  
+
+            # batch create metrics every 500 metrics
+            if len(call_args) > 500 * len(metrics):
+                subprocess.check_call("tsdb mkmetric " + " ".join(call_args), shell = True)
+                call_args = []
 
 
 
