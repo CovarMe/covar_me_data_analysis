@@ -7,6 +7,8 @@ library(httr)
 library(xml2)
 library (plyr)
 library(zoo)
+library(KFAS) ## for ldl decomposition
+library(quadprog) ## To solve the minimization problem using quadratic proramming
 
 
 
@@ -125,11 +127,37 @@ X <- apply(X,2,as.numeric)
 X <- apply(X,2, na.spline)
 rm(data)
 
+
 S <- t(X)%*%X
 Phi <- mkt_variance*(betas%*%t(betas)) + diag(res_var)
 
+## Example 
+alpha <- 1/2 
+Sigma <- alpha*S + alpha*Phi
+diagonalization <- eigen(A,TRUE)
+Q <- unlist(diagonalization[[2]])
+
+## Store A
+## Invert using the spectral decomposition
+Precision <- t(Q)%*%diag(1/unlist(diagonalization[[1]]))%*%Q 
+rm(Q)
+## Compute weightsù
+mu <- apply(X, 2, mean)
+target_ret <- 0.001
+A <- t(rep(1, dim(Precision)[1]))%*%Precision%*%rep(1, dim(Precision)[1])
+B <- t(rep(1, dim(Precision)[1]))%*%Precision%*%mu
+C <- t(mu)%*%Precision%*%mu
+weight <- as.numeric((C - target_ret*B)/(A*C- B^2))*(Precision%*%rep(1,dim(Precision)[1])) + 
+          as.numeric((target_ret*A-B)/(A*C - B^2))*Precision%*%mu
+port_var <- t(weight)%*%Sigma%*%weight
+
+             
+## Working on Wolf Ledoit regularization parameter alpha: To be finished
+
 X_centered <- apply(X, 2, function(x)(x - mean(x)))
-       
+
+
+
 p <- foreach(i = 1:(dim(X)[2]-1), .combine= function(x,y)(sum(x,y))) %dopar%{
   foreach(n = (i+1):dim(X)[2], .combine =function(x,y)(sum(x,y))) %dopar%{
     sum((X_centered[,i]*X_centered[,n] - S[i,n])^2)*1/dim(X)[1]  }
