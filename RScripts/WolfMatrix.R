@@ -151,6 +151,8 @@ weight <- as.numeric((C - target_ret*B)/(A*C- B^2))*(Precision%*%rep(1,dim(Preci
           as.numeric((target_ret*A-B)/(A*C - B^2))*Precision%*%mu
 port_var <- t(weight)%*%Sigma%*%weight
 
+             
+## Working on Wolf Ledoit regularization parameter alpha: To be finished
 
 X_centered <- apply(X, 2, function(x)(x - mean(x)))
 
