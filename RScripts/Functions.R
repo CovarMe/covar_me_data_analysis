@@ -40,12 +40,14 @@ compute_cov <- function(data,returns, alpha){
     X$date <- as.character(X$date)
     returnmatrix <- returnmatrix[returnmatrix$date %in% X$date,]
     dd <- merge(returnmatrix, X, by="date")
-    reg <- lm(stockreturn~I(mkt_return - rf), data=dd)
-    b1 <- coef(reg)[2]
-    epselon <- na.omit(dd$stockreturn) - predict(reg)
-    residual_var <- var(epselon)
-    ## Keep track also of the company 
-    list(b1,residual_var, listofreturns[[n]]$name)
+    reg <- tryCatch(lm(stockreturn~I(mkt_return - rf), data=dd), error=function(e){})
+    if(is.null(reg)==FALSE){
+      b1 <- coef(reg)[2]
+      epselon <- na.omit(dd$stockreturn) - predict(reg)
+      residual_var <- var(epselon)
+      ## Keep track also of the company 
+      list(b1,residual_var, listofreturns[[n]]$name)
+      }
   }
   
   
@@ -114,32 +116,66 @@ compute_cov <- function(data,returns, alpha){
 cross_validate <- function(data, returns, train_period, alpha){
   sequence <- seq(from=min(returns$date),to=max(returns$date), by="month")
   ## Drop the first periods module of the train period
-  sequence <- sequence[-c(1:(length(sequence)%%(train_period + 1)))]
-  mspe <- foreach(i=seq(from=1,to=(length(sequence) - train_period), by=(train_period+1)), .combine=append,.init=list()) %dopar% {
-    rr <- returns[returns$date >= sequence[i] & returns$date <= sequence[i+train_period - 1],]
+  
+  if (length(sequence)%%train_period == 0){
+    sequence <- sequence[-c(1:(train_period -1))]} else if (length(sequence)%%train_period != 1){
+    sequence <- sequence[-c(1:(length(sequence)%%train_period - 1))]}
+  
+  ## Loop in parallel
+    mspe <- foreach(i=seq(from=1,to=(length(sequence) - train_period), by=(train_period+1)), .combine=rbind) %dopar% {
+    rr <- returns[returns$date >= sequence[i] & returns$date <= sequence[i+train_period],]
     ## Pick the minimum variance matrix but first drop observations disappeared the following month
-    train <- data[data$date >= sequence[i] & data$date <= sequence[i+train_period - 1],]
-    test  <- data[data$date <= sequence[i+train_period] & data$date > sequence[i+train_period - 1],]
+    train <- data[data$date >= sequence[i] & data$date <= sequence[i+train_period],]
+    test  <- data[data$date >= sequence[i+train_period+1] & data$date <= sequence[i+train_period+2]  ,]
     train <- train[train$COMNAM %in% test$COMNAM,]
     values <- compute_cov(data = train, rr, alpha)[c(3,4,5)]
     test <- test[test$COMNAM %in% values$names,]
-    test_ret <- foreach(j=seq(1:length(values$weights)), .combine=function(x,y)(full_join(x,y,by="date"))) %do%{
+    
+    ## Keep track of possible errors
+    test_ret <- tryCatch(foreach(j=seq(1:length(values$weights)), .combine=function(x,y)(merge(x,y,by="date", all=T))) %do%{
       filtered <- filter(test, COMNAM == values$names[j])
       dates <- filtered$date
       ## Avoid Duplicated observations: same date, same company -> problem of dataset
       filtered <- filtered[!duplicated(filtered$date),]
       ## Keep track of shares with less days then others and cut non conformable days -> problem of dataset
       filtered <- filtered[filtered$date %in% dates,]
-      cat(paste0(as.character(length(filtered$date)), " "))
-      filtered$RET <- na.approx(filtered$RET)
-      data_frame <- as.data.frame(cbind(date = as.character(filtered$date), as.character(filtered$RET)))
+      
+      ## Put a treshold condition for NA values
+      if (sum(is.na(filtered$RET)) < length(filtered$RET)/2){
+        
+        ## Deal with NA
+        ## Last value is NA
+        if(is.na(filtered$RET[length(filtered$RET)])){
+          filtered$RET[length(filtered$RET)] <- filtered$RET[max(which(is.na(filtered$RET)==FALSE))]
+        } 
+        ## First value is NA
+        if (is.na(filtered$RET[1])){
+          filtered$RET[1] <- filtered$RET[min(which(is.na(filtered$RET)==FALSE))]
+        }
+        ## All other values are NA
+        filtered$RET <- na.approx(filtered$RET)
+        
+        data_frame <- as.data.frame(cbind(date = as.character(filtered$date), as.character(filtered$RET)))
+        #cat(paste0(as.character(length(data_frame$date)), " "))
+        names(data_frame) <- c("date", as.character(values$names[j]))
+        data_frame
+        #rownames(data_frame) <- c(1:dim(data_frame)[1])
+      }
+    }, error=function(e)("Stronzone errore"))
+    
+    ## Keep track of the number of errors
+    if(test_ret == "Stronzone errore"){
+      c(out_of_sample = NA, in_sample = values$tot_var, deleted=NA)
+    } else if(dim(test_ret)[2] < 2*length(values$names)/3){
+      ## Keep track of cases with too many missing values 
+      c(out_of_sample = NaN, in_sample = values$tot_var, deleted=NA)} else{
+        ## Good case
+        test_ret <- na.omit(test_ret)
+        W <- values$weights[values$names %in% names(test_ret)[-1]]
+        test_ret <- apply(test_ret[,-1],2,as.numeric)
+        var <- var(as.vector(t(W)%*%t(test_ret)))
+        c(out_of_sample = var, in_sample = values$tot_var, deleted = (length(values$weight) - length(W)) )  
+      }
     }
-    test_ret <- na.omit(test_ret)
-    test_ret <- apply(test_ret[,-1],2,as.numeric)
-    var <- var(as.vector(t(values$weights)%*%t(test_ret)))
-    list(out_of_sample = var, in_sample = values$tot_var)
-    cat(as.character(i), " ", as.character(dim(test_ret)[2]), " ", as.character(length(values$weights)), " ")
-    }
-  
-}
+  }
   
