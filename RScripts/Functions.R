@@ -86,7 +86,7 @@ compute_cov <- function(data,returns, alpha, target_ret){
   S <- t(X)%*%X
   Phi <- mkt_variance*(betas%*%t(betas)) + diag(res_var)
   
-  Sigma <- alpha*S + alpha*Phi
+  Sigma <- alpha*S + (1-alpha)*Phi
   diagonalization <- eigen(Sigma,TRUE)
   Q <- unlist(diagonalization[[2]])
   
