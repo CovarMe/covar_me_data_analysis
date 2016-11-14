@@ -12,7 +12,7 @@ require(lubridate)
 
 ## Compute best shrinkaged covariance matrix function
 ## Ricorda inizio fine parameters
-compute_cov <- function(data,returns, alpha){
+compute_cov <- function(data,returns, alpha, target_ret){
   
   #initial <- as.Date(strptime(min(returns$date), "%Y-%m-%d"))
   #end     <- as.Date(strptime(max(returns$date), "%Y-%m-%d"))
@@ -96,7 +96,7 @@ compute_cov <- function(data,returns, alpha){
   rm(Q)
   ## Compute weightsù
   mu <- apply(X, 2, mean)
-  target_ret <- 0.001
+  target_ret <- target_ret
   A <- t(rep(1, dim(Precision)[1]))%*%Precision%*%rep(1, dim(Precision)[1])
   B <- t(rep(1, dim(Precision)[1]))%*%Precision%*%mu
   C <- t(mu)%*%Precision%*%mu
@@ -113,7 +113,7 @@ compute_cov <- function(data,returns, alpha){
 ## Find alpha with cross validation: 
 
 
-cross_validate <- function(data, returns, train_period, alpha){
+cross_validate <- function(data, returns, train_period, alpha, target){
   sequence <- seq(from=min(returns$date),to=max(returns$date), by="month")
   ## Drop the first periods module of the train period
   
@@ -128,7 +128,7 @@ cross_validate <- function(data, returns, train_period, alpha){
     train <- data[data$date >= sequence[i] & data$date <= sequence[i+train_period],]
     test  <- data[data$date >= sequence[i+train_period+1] & data$date <= sequence[i+train_period+2]  ,]
     train <- train[train$COMNAM %in% test$COMNAM,]
-    values <- compute_cov(data = train, rr, alpha)[c(3,4,5)]
+    values <- compute_cov(data = train, rr, alpha, target_ret = target)[c(3,4,5)]
     test <- test[test$COMNAM %in% values$names,]
     
     ## Keep track of possible errors
@@ -173,9 +173,9 @@ cross_validate <- function(data, returns, train_period, alpha){
         test_ret <- na.omit(test_ret)
         W <- values$weights[values$names %in% names(test_ret)[-1]]
         test_ret <- apply(test_ret[,-1],2,as.numeric)
-        var <- var(as.vector(t(W)%*%t(test_ret)))
-        c(out_of_sample = var, in_sample = values$tot_var, deleted = (length(values$weight) - length(W)) )  
-      }
+        tt <- as.vector(t(W)%*%t(test_ret))
+        c(out_of_sample = var(tt), in_sample = values$tot_var, return = mean(tt), deleted = (length(values$weight) - length(W)))  }
     }
+    return(mspe)
   }
   
