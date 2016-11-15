@@ -80,19 +80,17 @@ compute_cov <- function(data,returns, alpha, target_ret){
   X <- apply(X,2,as.numeric)
   ## Interpolate missing column values using spline approximation
   X <- apply(X,2, na.spline)
-
-  
-  
-  S <- t(X)%*%X
+  #X <- scale(X, center=TRUE, scale=FALSE)
+  means <- apply(X,2,mean)
+  S <- (t(X)%*%X)/length(X[,1]) - means%*%t(means)
   Phi <- mkt_variance*(betas%*%t(betas)) + diag(res_var)
-  
   Sigma <- alpha*S + (1-alpha)*Phi
   diagonalization <- eigen(Sigma,TRUE)
   Q <- unlist(diagonalization[[2]])
   
   ## Store A
   ## Invert using the spectral decomposition
-  Precision <- t(Q)%*%diag(1/unlist(diagonalization[[1]]))%*%Q 
+  Precision <- Q%*%diag(1/unlist(diagonalization[[1]]))%*%t(Q) 
   rm(Q)
   ## Compute weightsù
   mu <- apply(X, 2, mean)
@@ -132,7 +130,7 @@ cross_validate <- function(data, returns, train_period, alpha, target){
     test <- test[test$COMNAM %in% values$names,]
     
     ## Keep track of possible errors
-    test_ret <- tryCatch(foreach(j=seq(1:length(values$weights)), .combine=function(x,y)(merge(x,y,by="date", all=T))) %do%{
+    test_ret <- tryCatch(foreach(j=seq(1:length(values$names)), .combine=function(x,y)(merge(x,y,by="date", all=T))) %do%{
       filtered <- filter(test, COMNAM == values$names[j])
       dates <- filtered$date
       ## Avoid Duplicated observations: same date, same company -> problem of dataset
@@ -164,7 +162,7 @@ cross_validate <- function(data, returns, train_period, alpha, target){
     }, error=function(e)("Stronzone errore"))
     
     ## Keep track of the number of errors
-    if(test_ret == "Stronzone errore"){
+    if(test_ret == "Stronzone errore" | is.null(test_ret)){
       c(out_of_sample = NA, in_sample = values$tot_var, deleted=NA)
     } else if(dim(test_ret)[2] < 2*length(values$names)/3){
       ## Keep track of cases with too many missing values 
