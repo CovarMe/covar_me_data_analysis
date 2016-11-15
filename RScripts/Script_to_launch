@@ -1,4 +1,4 @@
-l### Clean Data and run the process
+### Clean Data and run the process
 
 source("./cov_me/Functions.R")
 
@@ -55,20 +55,31 @@ variances <- foreach(alpha=alpha, .combine=cbind)%dopar%{
   cross_validate(data,returns,4,alpha, 0.01)}
 mspe <- apply(variances, 2, function(x)(mean(x,na.rm=TRUE)))
 
-write.table(mspe, "./Results_CV.txt")
+plot(x = alpha, y = mspe[seq(from=1, to=length(mspe), by=4)], type="n", main="CV on alpha", xlab="alpha", ylab="Var")
+lines(x = alpha, y = mspe[seq(from=1, to=length(mspe), by=4)], lwd=2, col="red")
+
+cc <- rep(NA,length(seq(from = 0.1, to = 1, by=0.1)))
+k <- 1
+for (i in seq(from = 0.1, to = 1, by=0.1))
+{
+  cc[k] <- compute_cov(data,returns,i, 0.01)$tot_var
+ k <- k+1
+  }
+#write.table(mspe, "./Results_CV.txt")
 vv <- which.min(mspe[seq(from=1, to=length(mspe), by=4)])
 
 ## Look for the minimum here
 alpha_2 <- seq(from=(seq(from = 0.1, to = 1, by=0.1)[vv] - 0.05), to=(seq(from = 0.1, to = 1, by=0.1)[vv] + 0.05), by=0.01)
-variances <- foreach(alpha=alpha_2, .combine=cbind)%dopar%{
+variances2 <- foreach(alpha=alpha_2, .combine=cbind)%dopar%{
   cross_validate(data,returns,4,alpha, 0.01)}
+mm <- apply(variances2, 2, function(x)(mean(x,na.rm=TRUE)))
 
 plot(x= alpha_2,y=mm[seq(from=1, to=length(mm), by=4)], 
-     main="Cross validation in the minumum region", xlab="alpha", ylab="Variance", type="n")
+     main="Cross validation in the minumum region", xlab="alpha", ylab="Variance", type="n",ylim=c(0,0.1))
 lines(x= alpha_2,y=mm[seq(from=1, to=length(mm), by=4)], col="red", lwd=2)
 
 
-## Asyntodic alpha from Wolf and Ledoit
+## Asyntodic alpha from Wolf and Ledoit: To be finished
 X_centered <- apply(X, 2, function(x)(x - mean(x)))
 
 
