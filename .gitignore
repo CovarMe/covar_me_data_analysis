@@ -1,3 +1,4 @@
 *.csv
 *.log
 *.txt
+covar_me_spark/target
