@@ -38,4 +38,13 @@ tar zxf hbase-1.2.4-bin.tar.gz
 sudo mv hbase-1.2.4 /home/hadoop/hbase
 sudo mv configs/hbase/* /home/hadoop/hbase/conf/
 sudo chown -R hadoop:hadoop /home/hadoop/hbase
+
+# install opentsdb
+wget https://github.com/OpenTSDB/opentsdb/releases/download/v2.3.0RC2/opentsdb-2.3.0-RC2.tar.gz
+tar xvf opentsdb-2.3.0-RC2.tar.gz
+cd opentsdb-2.3.0-RC2.tar.gz
+./build.sh
+sudo mv opentsdb-2.3.0-RC2.tar.gz /home/hadoop/opentsdb
+sudo chown -R hadoop:hadoop /home/hadoop/opentsdb
+sudo su hadoop
 ```
