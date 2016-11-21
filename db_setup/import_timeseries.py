@@ -1,7 +1,7 @@
 #!/usr/bin/python
 
 import sys, getopt, csv, requests, json, time, datetime, logging
-logging.basicConfig(filename='import.log',level=logging.DEBUG)
+logging.basicConfig(filename='import_timeseries.log',level=logging.DEBUG)
 
 def main(argv):
     # this entire first part is only for reading in the command line arguments 
