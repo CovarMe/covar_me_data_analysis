@@ -59,6 +59,7 @@ def main(argv):
             today = time.strftime("%Y-%m-%d")
             try:
                 new_stock_data = Share(ticker).get_historical(from_date, today)
+                print(new_stock_data)
             except:
                 logging.debug("Couldn't retrieve info for " + ticker + " from Yahoo.")
                 continue
@@ -76,11 +77,13 @@ def main(argv):
                     }
                 })
                 # check if the interval size has been reached and send a request
-                if (i % 50 == 0 and i != 0) or i >= len(new_stock_data):
+                if i + 1 == len(new_stock_data) or (i % 50 == 0 and i != 0):
                     response = requests.post(opentsdb_url + '/put?summary=true&details=true', 
                                              data = json.dumps(request_data))
+                    print(response)
                     try:
                         response_dict = response.json()
+                        logging.info(response_dict['success'])
                         if response_dict['failed'] > 1:
                             logging.debug(response.content)
 
