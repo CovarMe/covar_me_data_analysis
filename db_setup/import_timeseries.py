@@ -90,18 +90,22 @@ def main(argv):
 
             # check if the interval size has been reached and send a request
             if i % interval == 0 and i != 0:
+                time.sleep(0.25)
                 print '='
                 response = requests.post(request_url, 
                                          data = json.dumps(request_data))
                 try:
                     response_dict = response.json()
                     if response_dict['failed'] > 1:
+                        time.sleep(1)
                         logging.debug(response.content)
 
                     inserted += response_dict['success']
                     logging.debug('Inserted: ' + str(inserted))
                     request_data = []
                 except ValueError:
+                    time.sleep(1)
+                except:
                     sys.exit(response.reason)
 
 
