@@ -75,7 +75,7 @@ def main(argv):
             date = datetime.datetime.strptime(row[time_col], "%d/%m/%Y")
             # build a query object
             row_query_template = {
-                "timestamp":date.strftime('%s'), 
+                "timestamp": date.strftime('%s'), 
                 "tags": {
                     "company": row[name_col],
                 }
