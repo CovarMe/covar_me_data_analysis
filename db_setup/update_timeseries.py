@@ -11,13 +11,14 @@ logging.basicConfig(filename='update_timeseries.log',level=logging.DEBUG)
 def main(argv):
     # read in command line arguments
     try:
-        opts, args = getopt.getopt(argv,"hH:p:b:i:s:f:",[
+        opts, args = getopt.getopt(argv,"hH:p:b:i:s:f:o:",[
             "host=",
             "port=",
             "batch-size=",
             "interval=",
             "stocks=",
             "from-date=",
+            "offset="
         ])
     except getopt.GetoptError:
         print 'Wrong options supplied, try with -h'
@@ -32,6 +33,7 @@ def main(argv):
             print '    -i <repeat interval for the updating>'
             print '    -s <source file with tickers (csv)>'
             print '    -f date from which to update %Y-%m-%d'
+            print '    -o <number of offset rows to start importing from>' 
             sys.exit()
         elif opt in ("-H", "--host"):
             host = arg
@@ -45,7 +47,8 @@ def main(argv):
             source = arg
         elif opt in ("-f", "--from-date"):
             from_date = arg
-            # spawn multiple processes to update the timeseries
+        elif opt in ("-o", "--offset"):
+            n_offset = int(arg)
             
     opentsdb_url = "http://" \
             + host + ":" + str(port) \
@@ -53,7 +56,12 @@ def main(argv):
 
     tickers = []
     with open(source) as s:
-        for row in csv.DictReader(s):
+        csvr = csv.DictReader(s)
+        # skip the first n lines according to the offset option
+        for i in range(0, n_offset):
+            next(csvr)
+
+        for row in csvr :
             ticker = row['ticker']
             logging.info(ticker)
             today = time.strftime("%Y-%m-%d")
