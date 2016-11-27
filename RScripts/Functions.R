@@ -1,4 +1,6 @@
-library(foreach)
+## Script with functions : to load 
+
+#library(KFAS)
 library(doMC)
 library(parallel)
 library(dplyr)
@@ -8,172 +10,246 @@ library(xml2)
 library (plyr)
 library(zoo)
 require(lubridate)
+library(calibrate)
+#library(psych)
+library(OpenMx)
+
+cbind.fill <- function(...){
+  nm <- list(...) 
+  nm <- lapply(nm, as.matrix)
+  n <- max(sapply(nm, nrow)) 
+  do.call(cbind, lapply(nm, function (x) 
+    rbind(x, matrix(, n-nrow(x), ncol(x))))) 
+}
+
+noCores <- detectCores() - 1
+registerDoMC(noCores)
 
 
-## Compute best shrinkaged covariance matrix function
-## Ricorda inizio fine parameters
-compute_cov <- function(data,returns, alpha, target_ret){
+
+## Open in the environment the thickers
+tickers <- read.csv("/home/admin/covar_me/data/tickers.csv")
+#tickers <- read.csv("./covar_me/data/tickers.csv")
+returns <- read.table("/home/admin/covar_me/data/returns.txt")
+start_date <- returns$date[1]
+returns$date <- as.character(returns$date)
+
+## Rescale by 100 to avoid underflow
+returns$mkt_return <- returns$mkt_return*100
+returns$rf <- returns$rf*100
+
+
+start_pos <- as.POSIXct(start_date, origin="1970-01-01")
+end_pos   <- as.POSIXct("2016-08-01", origin="1970-01-01")
+
+
+
+## HELPER FUNCTION 1
+
+## The function compute the variance of a given portfolio on a time period
+## Given the weights and the correspondig tickers
+
+compute_var_on_weights <- function(weights, tick, start, end){
   
-  #initial <- as.Date(strptime(min(returns$date), "%Y-%m-%d"))
-  #end     <- as.Date(strptime(max(returns$date), "%Y-%m-%d"))
+  estimates  <- tryCatch(foreach(n = c(1:length(tick)), .combine = append) %dopar%{
+    nn <- as.character(tick[n])
+    ## Query the database
+    aa <- tryCatch(GET(paste0("http://52.208.21.118:9001/api/query/?start=",start,"&end=", end, "&m=sum:",
+                              nn,".return{company=",nn,"}")), error=function(e){})
+    if(is.null(aa)==FALSE){
+      
+      encoded <- content(aa, as = "parse", encoding = "utf-8")
+      ret <- unlist(encoded)[-c(1,2,3)]
+      time <- substr(names(ret), 5, nchar(names(ret)))
+      time <- as.character(as.Date(as.POSIXct(as.numeric(time), origin="1970-01-01")))
+      vector <- as.data.frame(cbind(time = time, ret=as.vector(ret)))
+      vector[,2] <- 100*as.numeric(as.character(vector[,2]))
+      vector[,1] <- as.character(vector[,1])
+      names(vector) <- c("date","stockreturn")
+      list(name= nn, ret = vector$stockreturn,date=vector$date)
+    }
+  }, error=function(e){})  
   
-  
-  ## To select the window we only need to select it from returns
- # returns <- filter(returns, date > initial & date < end)
-  
-  
-  listofreturns <- foreach(n = companynames  , .combine = append, .init=list()) %dopar% {
-    ## Pick only companies who shows the same day we selected
-    if(all(returns$date %in% data[data$COMNAM == n,]$date)){
-      list(list(name=as.character(n),return= data[data$COMNAM == n,]$RET,date =as.character(data[data$COMNAM == n,]$date)))}
-  }
-  
-  ## Match regressions by dates
-  estimates  <- foreach(n = 1:length(listofreturns), .combine = append, .init = list()) %dopar%{
-    returnmatrix <- as.data.frame(cbind(listofreturns[[n]]$return, as.character(listofreturns[[n]]$date)))
-    returnmatrix$V1 <- as.numeric(as.character(returnmatrix$V1))
-    colnames(returnmatrix) <- c("stockreturn", "date" )
-    returnmatrix$date <- as.character(returnmatrix$date)
-    ## Get the vector of returns matching the date of our vector
-    X <- returns[as.character(returns$date) %in% returnmatrix$date,]
-    X <- X[!duplicated(X$date),]
-    X$date <- as.character(X$date)
-    returnmatrix <- returnmatrix[returnmatrix$date %in% X$date,]
-    dd <- merge(returnmatrix, X, by="date")
-    reg <- tryCatch(lm(stockreturn~I(mkt_return - rf), data=dd), error=function(e){})
-    if(is.null(reg)==FALSE){
-      b1 <- coef(reg)[2]
-      epselon <- na.omit(dd$stockreturn) - predict(reg)
-      residual_var <- var(epselon)
-      ## Keep track also of the company 
-      list(b1,residual_var, listofreturns[[n]]$name)
+  if (is.null(estimates)==FALSE){
+    
+      ## Create the matrix with returns from queries
+      X <- foreach(n = seq(from=2,to=length(estimates), by=3), .combine = function(x,y)(merge(x,y,by="date",all=T))) %do% {
+      column_ret <- tryCatch(as.vector(unlist(estimates[n])), error=function(e){})
+
+        if (length(column_ret)>1){
+        column_date <- as.vector(unlist(estimates[n+1]))
+        xx <- data.frame(cbind(ret=column_ret,date = column_date))
+        names(xx) <- c(as.character(unlist(estimates[n-1])), "date")
+        xx  
       }
+    }
+    ## Some data cleaning
+ 
+    X <- as.matrix(X[,-1])
+    X <- apply(X,2,as.numeric)
+    ## Kill observations with too many NAs
+    X<- X[,colSums(is.na(X))<nrow(X)*3/4]
+    names <- tick[tick %in% colnames(X)]
+    ww <- weights[which(tick %in% names)]
+    X <- X[,names]
+    ## Replace zeros in NA to avoid their computations in the matrix multiplication
+    X[is.na(X)] <- 0 ##Brute force approach: underestimate the varince
+    ## compute return variance
+    var <- var(X%*%as.vector(ww))
+    return(var)
   }
-  
-  
-  ## Biased variance estimator:
-  names <- unlist(estimates[seq(from=3,to=length(estimates), by=3)])
-  betas <- matrix(estimates[seq(from=1,to=length(estimates), by=3)])
-  betas <- as.numeric(as.character(betas))
-  mkt_variance <- var(returns$mkt_return)
-  res_var <- matrix(estimates[seq(from=2,to=length(estimates), by=3)])
-  res_var <- as.numeric(as.character(res_var))
-  ## Drop all useless staff
-
-  
-  ## filter the companies with our names
-  data2 <-  filter(data, COMNAM %in% names)
-  
-  ## filter the data with dates in mktreturn dates
-  data2 <- filter(data, date %in% returns$date)
-  ## S: sample covariance, Phi is the prior, alpha is the shrinkage paramete
-  
-  
-  X <- foreach(n = names, .combine = function(x,y)(merge(x,y,by="date")), .init=returns) %dopar% {
-    filtered <- filter(data2, COMNAM == n)
-    filtered <- filter(filtered, date %in% returns$date)
-    filtered <- filtered[!duplicated(filtered$date),]
-    xx <- data.frame(cbind(filtered$RET,date =filtered$date))
-    names(xx) <- c(as.character(n), "date")
-    xx }
-  X <- X[,names]
-  X <- apply(X,2,as.numeric)
-  ## Interpolate missing column values using spline approximation
-  X <- apply(X,2, na.spline)
-  #X <- scale(X, center=TRUE, scale=FALSE)
-  means <- apply(X,2,mean)
-  S <- (t(X)%*%X)/length(X[,1]) - means%*%t(means)
-  Phi <- mkt_variance*(betas%*%t(betas)) + diag(res_var)
-  Sigma <- alpha*S + (1-alpha)*Phi
-  diagonalization <- eigen(Sigma,TRUE)
-  Q <- unlist(diagonalization[[2]])
-  
-  ## Store A
-  ## Invert using the spectral decomposition
-  Precision <- Q%*%diag(1/unlist(diagonalization[[1]]))%*%t(Q) 
-  rm(Q)
-  ## Compute weightsù
-  mu <- apply(X, 2, mean)
-  target_ret <- target_ret
-  A <- t(rep(1, dim(Precision)[1]))%*%Precision%*%rep(1, dim(Precision)[1])
-  B <- t(rep(1, dim(Precision)[1]))%*%Precision%*%mu
-  C <- t(mu)%*%Precision%*%mu
-  weight <- as.numeric((C - target_ret*B)/(A*C- B^2))*(Precision%*%rep(1,dim(Precision)[1])) + 
-    as.numeric((target_ret*A-B)/(A*C - B^2))*Precision%*%mu
-  port_var <- t(weight)%*%Sigma%*%weight
-  
-  return(list(Sigma=Sigma,Precision = Precision,weights = weight,tot_var = port_var,names = names))
-  
 }
 
 
 
-## Find alpha with cross validation: 
+
+## HELPER FUNCTION 2
 
 
-cross_validate <- function(data, returns, train_period, alpha, target){
-  sequence <- seq(from=min(returns$date),to=max(returns$date), by="month")
-  ## Drop the first periods module of the train period
-  
-  if (length(sequence)%%train_period == 0){
-    sequence <- sequence[-c(1:(train_period -1))]} else if (length(sequence)%%train_period != 1){
-    sequence <- sequence[-c(1:(length(sequence)%%train_period - 1))]}
-  
-  ## Loop in parallel
-    mspe <- foreach(i=seq(from=1,to=(length(sequence) - train_period), by=(train_period+1)), .combine=rbind) %dopar% {
-    rr <- returns[returns$date >= sequence[i] & returns$date <= sequence[i+train_period],]
-    ## Pick the minimum variance matrix but first drop observations disappeared the following month
-    train <- data[data$date >= sequence[i] & data$date <= sequence[i+train_period],]
-    test  <- data[data$date >= sequence[i+train_period+1] & data$date <= sequence[i+train_period+2]  ,]
-    train <- train[train$COMNAM %in% test$COMNAM,]
-    values <- compute_cov(data = train, rr, alpha, target_ret = target)[c(3,4,5)]
-    test <- test[test$COMNAM %in% values$names,]
+## Compute covariance matrix, mean vector and in sample best weights
+
+compute_cov <- function(returns,tickers, alpha, target_ret, method=NULL, n_stock=100, start="1262563200", end="1470002400"){
+  ## Match regressions by dates, same of previous function
+  estimates  <- foreach(n = c(1:n_stock), .combine = append) %dopar%{
     
-    ## Keep track of possible errors
-    test_ret <- tryCatch(foreach(j=seq(1:length(values$names)), .combine=function(x,y)(merge(x,y,by="date", all=T))) %do%{
-      filtered <- filter(test, COMNAM == values$names[j])
-      dates <- filtered$date
-      ## Avoid Duplicated observations: same date, same company -> problem of dataset
-      filtered <- filtered[!duplicated(filtered$date),]
-      ## Keep track of shares with less days then others and cut non conformable days -> problem of dataset
-      filtered <- filtered[filtered$date %in% dates,]
+    nn <- as.character(tickers[n,1])
+    aa <- tryCatch(GET(paste0("http://52.208.21.118:9001/api/query/?start=",start,"&end=", end, "&m=sum:",
+                              nn,".return{company=",nn,"}")), error=function(e){})
+    
+    if(is.null(aa)==FALSE){
       
-      ## Put a treshold condition for NA values
-      if (sum(is.na(filtered$RET)) < length(filtered$RET)/2){
-        
-        ## Deal with NA
-        ## Last value is NA
-        if(is.na(filtered$RET[length(filtered$RET)])){
-          filtered$RET[length(filtered$RET)] <- filtered$RET[max(which(is.na(filtered$RET)==FALSE))]
-        } 
-        ## First value is NA
-        if (is.na(filtered$RET[1])){
-          filtered$RET[1] <- filtered$RET[min(which(is.na(filtered$RET)==FALSE))]
-        }
-        ## All other values are NA
-        filtered$RET <- na.approx(filtered$RET)
-        
-        data_frame <- as.data.frame(cbind(date = as.character(filtered$date), as.character(filtered$RET)))
-        #cat(paste0(as.character(length(data_frame$date)), " "))
-        names(data_frame) <- c("date", as.character(values$names[j]))
-        data_frame
-        #rownames(data_frame) <- c(1:dim(data_frame)[1])
+      encoded <- content(aa, as = "parse", encoding = "utf-8")
+      ret <- unlist(encoded)[-c(1,2,3)]
+      time <- substr(names(ret), 5, nchar(names(ret)))
+      time <- as.character(as.Date(as.POSIXct(as.numeric(time), origin="1970-01-01")))
+      vector <- as.data.frame(cbind(time = time, ret=as.vector(ret)))
+      vector[,2] <- 100*as.numeric(as.character(vector[,2]))
+      vector[,1] <- as.character(vector[,1])
+      
+      names(vector) <- c("date","stockreturn")
+      X <- returns[as.character(returns$date) %in% vector$date,]
+      X <- X[!duplicated(X$date),]
+      vector <- vector[vector$date %in% X$date,]
+      dd <- merge(vector, X, by="date", all=T)
+      ## Compute the regression coefficients from one single factor model
+      reg <- tryCatch(lm(I(stockreturn-rf)~I(mkt_return - rf), data=dd), error=function(e){})
+      if(is.null(reg)==FALSE){
+        b1 <- coef(reg)[2]
+        epselon <- na.omit(dd$stockreturn) - predict(reg)
+        residual_var <- var(epselon)
+        ## Keep track also of the company 
+        list(b1 = b1,res=residual_var, name = nn, ret = vector$stockreturn,date=vector$date)
       }
-    }, error=function(e)("Stronzone errore"))
-    
-    ## Keep track of the number of errors
-    if(test_ret == "Stronzone errore" | is.null(test_ret)){
-      c(out_of_sample = NA, in_sample = values$tot_var, deleted=NA)
-    } else if(dim(test_ret)[2] < 2*length(values$names)/3){
-      ## Keep track of cases with too many missing values 
-      c(out_of_sample = NaN, in_sample = values$tot_var, deleted=NA)} else{
-        ## Good case
-        test_ret <- na.omit(test_ret)
-        W <- values$weights[values$names %in% names(test_ret)[-1]]
-        test_ret <- apply(test_ret[,-1],2,as.numeric)
-        tt <- as.vector(t(W)%*%t(test_ret))
-        c(out_of_sample = var(tt), in_sample = values$tot_var, return = mean(tt), deleted = (length(values$weight) - length(W)))  }
-    }
-    return(mspe)
+    }  
   }
   
+  if (is.null(estimates)==FALSE){
+    
+    ## Biased variance estimator:
+    betas <- matrix(estimates[seq(from=1,to=length(estimates), by=5)])
+    betas <- as.numeric(as.character(betas))
+    mkt_variance <- var(returns$mkt_return)
+    res_var <- matrix(estimates[seq(from=2,to=length(estimates), by=5)])
+    res_var <- as.numeric(as.character(res_var))
+
+    
+    ## Compute the X of returns
+    X <- foreach(n = seq(from=4,to=length(estimates), by=5), .combine = function(x,y)(merge(x,y,by="date",all=T))) %do% {
+      column_ret <- as.vector(unlist(estimates[n]))
+      column_date <- as.vector(unlist(estimates[n+1]))
+      xx <- data.frame(cbind(ret=column_ret,date = column_date))
+      names(xx) <- c(as.character(unlist(estimates[n-1])), "date")
+      xx }
+    
+    ## Data cleaning
+  tt <- X
+    X <- apply(X,2,as.numeric)
+    X <- as.matrix(X[,-1])
+    ## deal with missing values treshold on 1/4 or greater NA
+    betas <- betas[colSums(is.na(X))<nrow(X)*3/4]
+    res_var <- res_var[colSums(is.na(X))<nrow(X)*3/4]
+    X<- X[,colSums(is.na(X))<nrow(X)*3/4]
+    ## Replace zeros in NA to avoid their computations in the matrix multiplication
+    X[is.na(X)] <- 0 ##Brute force approach
+    ## Wolf and Ledoit method
+    mu <- apply(X, 2, function(x)(mean(x,na.rm=T)))
+    S <- (t(X)%*%X)/length(X[,1]) - mu%*%t(mu)
+    Phi <- mkt_variance*(betas%*%t(betas)) + diag(res_var)
+    Sigma <- alpha*S + (1-alpha)*Phi
+    diagonalization <- eigen(Sigma,TRUE)
+    Q <- unlist(diagonalization[[2]])
+    names <- colnames(X)
+    
+    
+    ## Store A
+    ## Invert using the spectral decomposition
+    Precision <- Q%*%diag(1/unlist(diagonalization[[1]]))%*%t(Q) 
+    rm(Q)
+    ## Compute weights
+    target_ret <- target_ret
+    A <- t(rep(1, dim(Precision)[1]))%*%Precision%*%rep(1, dim(Precision)[1])
+    B <- t(rep(1, dim(Precision)[1]))%*%Precision%*%mu
+    C <- t(mu)%*%Precision%*%mu
+    weight <- as.numeric((C - target_ret*B)/(A*C- B^2))*(Precision%*%rep(1,dim(Precision)[1])) + 
+      as.numeric((target_ret*A-B)/(A*C - B^2))*Precision%*%mu
+    port_var <- t(weight)%*%Sigma%*%weight
+    
+    if(method=="Test"){
+      
+      ## Test with a diagonal matrix with variances on the diagonal 
+      
+      Precision_diag <- diag(as.vector(1/diag2vec(S)))
+      Sigma_diag <- diag(as.vector(diag2vec(S)))
+      A <- t(rep(1, dim(Precision_diag)[1]))%*%Precision_diag%*%rep(1, dim(Precision_diag)[1])
+      B <- t(rep(1, dim(Precision_diag)[1]))%*%Precision_diag%*%mu
+      C <- t(mu)%*%Precision_diag%*%mu
+      weight_diag <- as.numeric((C - target_ret*B)/(A*C- B^2))*(Precision_diag%*%rep(1,dim(Precision_diag)[1])) + 
+        as.numeric((target_ret*A-B)/(A*C - B^2))*Precision_diag%*%mu
+      port_var_diag <- t(weight_diag)%*%Sigma_diag%*%weight_diag
+      
+      return(list(Sigma=Sigma,Precision = Precision,weights = weight,tot_var = port_var,names = names, mean=mu, test=port_var_diag, w_diag=weight_diag)) 
+      
+    } else {
+      return(list(Sigma=Sigma,Precision = Precision,weights = weight,tot_var = port_var,names = names, mean=mu, data=tt)} 
+  } }
+
+
+
+
+## Function to do cross validation on time serie
+## Last result is na by construction :D
+
+cross_validate <- function(returns, tickers, train_period, alpha, target, n_stock){
+  
+  ## define the whole sequence of the period
+  sequence <- seq(from=start_pos,to=end_pos, by="month")
+  sequence <- as.character(as.numeric(sequence))
+  ## Drop the first periods module of the train period
+  if (length(sequence)%%train_period == 0){
+    sequence <- sequence[-c(1:(train_period - 1))]} else if (length(sequence)%%train_period != 1){
+      sequence <- sequence[-c(1:(length(sequence)%%train_period - 1))]}
+  
+  ## Loop in parallel
+  mspe <- foreach(i=seq(from=1,to=(length(sequence) - train_period), by=(train_period+1)), .combine=rbind) %dopar% {
+    ## Compute in sample variables
+    values <- tryCatch(compute_cov(returns, tickers, alpha, target, "No test", n_stock=n_stock,start=sequence[i],end=sequence[i+train_period]),error=function(e){})
+    ## Some error handling
+  if(is.null(values)==FALSE){
+      
+  w_train <- as.numeric(as.character(unlist(values[3])))
+  ## Compute the test error
+  test_var <- tryCatch(compute_var_on_weights(w_train, tick=as.character(unlist(values[5])),  
+      start=sequence[i+train_period+1], end=sequence[i+train_period+2]), error=function(e){NA})
+      
+
+          c(out_of_sample = test_var, in_sample=unlist(values[4]))} 
+}
+
+  return(mspe)
+
+}
+
+
+
+## Alternative method: Use LDL decomposition and play with it to find optimum lambda
+
