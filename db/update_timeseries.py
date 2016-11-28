@@ -30,7 +30,7 @@ def main(argv):
             print '    -H <host>'
             print '    -p <port>'
             print '    -b <request batch size>'
-            print '    -i <repeat interval for the updating>'
+            print '    -i <call interval seconds (to prevent overloading OpenTSDB)>'
             print '    -s <source file with tickers (csv)>'
             print '    -f date from which to update %Y-%m-%d'
             print '    -o <number of offset rows to start importing from>' 
@@ -42,7 +42,7 @@ def main(argv):
         elif opt in ("-b", "--batch-size"):
             batch_size = int(arg)
         elif opt in ("-i", "--interval"):
-            interval = int(arg)
+            interval = float(arg)
         elif opt in ("-s", "--source"):
             source = arg
         elif opt in ("-f", "--from-date"):
@@ -62,6 +62,7 @@ def main(argv):
             next(csvr)
 
         for row in csvr :
+            print(row['ticker'])
             ticker = row['ticker']
             logging.info(ticker)
             today = time.strftime("%Y-%m-%d")
@@ -99,6 +100,7 @@ def main(argv):
                         logging.debug(response.content)
 
                     request_data = []
+                    time.sleep(interval)
 
 
 if __name__ == "__main__":
