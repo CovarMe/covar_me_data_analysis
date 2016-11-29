@@ -1,28 +1,41 @@
-library(rmongodb)
-library(foreach)
+library('rmongodb')
+library('foreach')
+library('doParallel')
 
 # opens a connection to MongoDB and stores 
 # all the elements of the matrix individually
 # using parralelization to run faster
 create.mongodb.matrix <- function(the.matrix, the.host) {
-  mongo <- mongo.create(host = the.host) 
-  mongo.is.connected(mongo)
   n <- nrow(the.matrix)
   m <- (n ** 2 + n) / 2
   matrix.item.list <- rep(list(i='',j='',v=0,matrix_name=''), m)
-  t.i <- 1
+  registerDoParallel(cores = 4)  
   system.time({
-    foreach(i = 1:n) %dopar% {
+#     for (i in 1:n) {
+    foreach(i = 1:n,
+            .export=c('mongo.create',
+                      'mongo.is.connected',
+                      'mongo.bson.from.list',
+                      'mongo.insert.batch'), 
+            .packages='rmongodb') %dopar% {
+      batch <- list()
+      mongo <- mongo.create(host = the.host) 
+      mongo.is.connected(mongo)
+      t.j = 1
       for (j in 1:(n + 1 - i)) {
-        print(t.i)
-        t.i <- t.i + 1
         mi <- mongo.bson.from.list(list(i=colnames(the.matrix)[i],
                                         j=colnames(the.matrix)[j],
                                         v=the.matrix[i,j],
                                         matrix_name='covariance'))
-        mongo.insert.batch(mongo, 
-                           ns = "covar_me.matrix_item", 
-                           lst = list(mi))
+        batch[[t.j]] <- mi
+        t.j <- t.j + 1
+        if (length(batch) > 500 || j == (n + 1 - i)) {
+          mongo.insert.batch(mongo, 
+                             ns = "covar_me.matrix_item", 
+                             lst = batch)
+          print(batch)
+          batch <- list()
+        }
       }
     }
   })
