@@ -29,10 +29,14 @@ create.mongodb.matrix <- function(the.matrix, the.host) {
                                         matrix_name='covariance'))
         batch[[t.j]] <- mi
         t.j <- t.j + 1
-        if (length(batch) > 500 || j == (n + 1 - i)) {
-          mongo.insert.batch(mongo, 
+        if (length(batch) > 2500 || j == (n + 1 - i)) {
+          tryCatch({
+            mongo.insert.batch(mongo, 
                              ns = "covar_me.matrix_item", 
                              lst = batch)
+          }, error = function(e) {
+            write(e, 'mongo_matrix.log', append = T)
+          })
           print(batch)
           batch <- list()
         }
