@@ -18,9 +18,7 @@ opt = parse_args(opt_parser)
 
 source('./helpers/mongodb_matrix.R')
 
-the.matrix <- read.table.ffdf(x = NULL, 
-                              file = opt$file,
-                              sep = ' ')
+the.matrix <- read.table(opt$file)
 print('New matrix loaded')
 
 create.mongodb.matrix(the.matrix, opt$host)
